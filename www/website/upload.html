@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload &amp; Transform</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen antialiased">
+
+    <div class="max-w-3xl mx-auto p-6 space-y-8">
+        <header class="border-b border-slate-800 pb-6 flex justify-between items-center">
+            <div>
+                <h1
+                    class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">
+                    Upload &amp; Transform
+                </h1>
+                <p class="text-slate-400 mt-1 text-sm">Upload a text file, optionally uppercased and/or translated to
+                    English via CGI, into <code class="text-teal-300">uploads/</code></p>
+            </div>
+            <a href="/"
+                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 rounded-lg text-sm font-semibold transition">
+                ← Home
+            </a>
+        </header>
+
+        <!-- Upload form -->
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-5">
+            <p class="text-slate-300 text-sm">
+                Tick a transform to route the body through the CGI
+                (<span class="text-slate-400 font-mono">POST /cgi-bin/transform.py?name=&lt;file&gt;&amp;…</span>).
+                With nothing ticked the body is uploaded straight to
+                <span class="text-slate-400 font-mono">/uploads/&lt;file&gt;</span> — no CGI.
+            </p>
+
+            <form id="upload-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                        Pick a text file (optional — loads it into the box below)
+                    </label>
+                    <input id="file-input" type="file" accept=".txt,text/plain"
+                        class="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-teal-600 file:text-white file:font-semibold hover:file:bg-teal-500 file:cursor-pointer" />
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                        Content to upload
+                    </label>
+                    <textarea id="content" rows="8" required
+                        class="w-full bg-slate-900 border border-slate-700 rounded p-3 font-mono text-sm focus:outline-none focus:border-teal-400 text-slate-200"
+                        placeholder="Type some text, or pick a .txt file above..."></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                        Save as (used only when you type the content yourself)
+                    </label>
+                    <input id="save-as" type="text" value="upload.txt"
+                        class="w-full bg-slate-900 border border-slate-700 rounded p-2 font-mono text-sm focus:outline-none focus:border-teal-400 text-slate-200 disabled:opacity-50"
+                        placeholder="notes.txt" />
+                    <p class="text-slate-500 text-xs mt-1">When you pick a file above, its own name is used and this
+                        field is ignored.</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Transform (optional)
+                    </label>
+                    <div class="space-y-2">
+                        <label class="flex items-center gap-2 text-sm text-slate-200 cursor-pointer w-fit">
+                            <input id="opt-uppercase" type="checkbox" class="accent-teal-500 w-4 h-4">
+                            Uppercase it
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-slate-200 cursor-pointer w-fit">
+                            <input id="opt-translate" type="checkbox" class="accent-teal-500 w-4 h-4">
+                            Translate from French to English
+                        </label>
+                    </div>
+                    <p class="text-slate-500 text-xs mt-2">Tick one or both to use the CGI; leave both unticked to
+                        upload directly.</p>
+                </div>
+
+                <button type="submit"
+                    class="bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold px-5 py-2 rounded text-sm transition cursor-pointer">
+                    Upload
+                </button>
+            </form>
+
+            <div id="response-box"
+                class="hidden mt-4 p-4 bg-slate-900 rounded border border-slate-700 font-mono text-xs space-y-1">
+                <div class="text-slate-500">// Response (HTTP <span id="response-status"></span>):</div>
+                <div id="response-text" class="text-emerald-400 whitespace-pre-wrap"></div>
+            </div>
+        </div>
+
+        <!-- File list -->
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-bold text-teal-400">Uploaded files</h2>
+                <button id="btn-refresh"
+                    class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-sm transition cursor-pointer">↻
+                    Refresh</button>
+            </div>
+            <ul id="file-list" class="divide-y divide-slate-700"></ul>
+            <p id="empty-msg" class="text-slate-500 italic text-sm hidden">No files yet.</p>
+            <div id="list-msg" class="hidden font-mono text-xs"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const UPLOAD_PATH = '/uploads';
+
+            const form = document.getElementById('upload-form');
+            const fileInput = document.getElementById('file-input');
+            const content = document.getElementById('content');
+            const saveAs = document.getElementById('save-as');
+            const optUpper = document.getElementById('opt-uppercase');
+            const optTranslate = document.getElementById('opt-translate');
+            const box = document.getElementById('response-box');
+            const statusEl = document.getElementById('response-status');
+            const text = document.getElementById('response-text');
+
+            // ── pick a file: load it into the textarea; its own name becomes the
+            //    save name, so the "Save as" field is disabled while a file is chosen.
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files[0];
+                if (!file) { saveAs.disabled = false; return; }
+                const reader = new FileReader();
+                reader.onload = () => { content.value = reader.result; };
+                reader.readAsText(file);
+                saveAs.value = file.name;
+                saveAs.disabled = true;
+            });
+
+            // ── submit: no transform -> direct POST to /uploads/; otherwise CGI.
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                box.classList.remove('hidden');
+                statusEl.textContent = '...';
+                text.textContent = 'Uploading...';
+
+                // Name: the picked file's name, or the "Save as" field for typed content.
+                const picked = fileInput.files[0];
+                const name = picked ? picked.name : (saveAs.value.trim() || 'upload.txt');
+                const body = content.value;
+                const doUpper = optUpper.checked;
+                const doTranslate = optTranslate.checked;
+
+                let url;
+                if (!doUpper && !doTranslate) {
+                    url = UPLOAD_PATH + '/' + encodeURIComponent(name);   // direct, no CGI
+                } else {
+                    url = '/cgi-bin/transform.py?name=' + encodeURIComponent(name);
+                    if (doUpper) url += '&uppercase=1';
+                    if (doTranslate) url += '&translate=1';
+                }
+
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain' },
+                        body: body
+                    });
+                    statusEl.textContent = res.status;
+                    text.textContent = (await res.text()) || '(no response body)';
+                    fetchFileList();
+                } catch (err) {
+                    statusEl.textContent = 'ERR';
+                    text.textContent = 'Error: ' + err.message;
+                }
+            });
+
+            // ── file list (parsed from the /uploads/ autoindex page) ──────────────
+            function listMsg(msg, ok) {
+                const el = document.getElementById('list-msg');
+                el.textContent = msg;
+                el.className = 'font-mono text-xs ' + (ok ? 'text-emerald-400' : 'text-red-400');
+            }
+
+            function renderList(files) {
+                const ul = document.getElementById('file-list');
+                const empty = document.getElementById('empty-msg');
+                ul.innerHTML = '';
+                empty.classList.toggle('hidden', files.length !== 0);
+                files.forEach((name) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center justify-between gap-3 py-2';
+
+                    const span = document.createElement('span');
+                    span.className = 'font-mono text-sm text-sky-300 break-all flex-1';
+                    const a = document.createElement('a');
+                    a.href = UPLOAD_PATH + '/' + encodeURIComponent(name);
+                    a.target = '_blank';
+                    a.textContent = name;
+                    a.className = 'hover:underline';
+                    span.appendChild(a);
+
+                    const btn = document.createElement('button');
+                    btn.className = 'text-red-400 border border-red-400 hover:bg-red-900/40 rounded px-2 py-1 text-xs transition cursor-pointer';
+                    btn.textContent = 'Delete';
+                    btn.onclick = () => deleteFile(name);
+
+                    li.append(span, btn);
+                    ul.appendChild(li);
+                });
+            }
+
+            function fetchFileList() {
+                fetch(UPLOAD_PATH + '/')
+                    .then((r) => r.text())
+                    .then((html) => {
+                        const doc = new DOMParser().parseFromString(html, 'text/html');
+                        const files = [];
+                        doc.querySelectorAll('a').forEach((link) => {
+                            const name = link.textContent.trim();
+                            if (name === '..' || name === '') return;     // skip parent link
+                            if (name[name.length - 1] !== '/') files.push(name);  // skip dirs
+                        });
+                        renderList(files);
+                    })
+                    .catch(() => renderList([]));
+            }
+
+            function deleteFile(name) {
+                fetch(UPLOAD_PATH + '/' + encodeURIComponent(name), { method: 'DELETE' })
+                    .then((r) => {
+                        if (r.status === 204 || r.status === 200) {
+                            listMsg('Deleted "' + name + '".', true);
+                        } else {
+                            listMsg('Error ' + r.status + ' deleting "' + name + '".', false);
+                        }
+                        fetchFileList();
+                    })
+                    .catch((e) => listMsg('Network error: ' + e.message, false));
+            }
+
+            document.getElementById('btn-refresh').addEventListener('click', fetchFileList);
+            fetchFileList();
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contact - website2</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <strong>website2</strong>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="contact.html" class="active">Contact</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Contact</h1>
+    <p>This location accepts <code>GET</code> and <code>POST</code>.</p>
+
+    <div class="card">
+      <h2>Send a message</h2>
+      <form method="POST" action="contact.html">
+        <p><input type="text" name="name" placeholder="Your name"></p>
+        <p><textarea name="message" placeholder="Your message" rows="4" cols="40"></textarea></p>
+        <p><button type="submit">Send</button></p>
+      </form>
+    </div>
+  </main>
+
+  <footer>
+    Served by webserv &middot; virtual host <code>localhost2</code> &middot; port 8081
+  </footer>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>42 Webserv Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen antialiased">
+
+    <div class="max-w-5xl mx-auto p-6 space-y-8">
+        <header class="border-b border-slate-800 pb-6 flex justify-between items-center">
+            <div>
+                <h1
+                    class="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">
+                    42 Webserv
+                </h1>
+                <p class="text-slate-400 mt-1">HTTP/1.0 Server Written in C++ 98</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/upload.html"
+                    class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+                    📁 Files
+                </a>
+                <div id="auth-box" class="flex items-center gap-3">
+                    <!-- login / logout UI injected by JS from the `user` cookie -->
+                </div>
+            </div>
+        </header>
+
+        <div id="greeting" class="text-teal-300 text-sm font-medium"></div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
+                <h2 class="text-xl font-bold text-teal-400 flex items-center gap-2">
+                    <span class="bg-green-500/10 text-green-400 px-2 py-0.5 rounded text-xs font-mono">GET</span>
+                    Static Routing & Error Pages
+                </h2>
+                <p class="text-slate-300 text-sm">Test your server's routing configurations and error-handling
+                    capabilities.</p>
+                <div class="flex flex-wrap gap-3">
+                    <a href="/nonexistent-page-test"
+                        class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded text-sm transition font-medium">
+                        Trigger 404 Error
+                    </a>
+                    <a href="/google"
+                        class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded text-sm transition font-medium">
+                        Test redirect
+                    </a>
+                    <a href="/cgi-bin/"
+                        class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded text-sm transition font-medium">
+                        CGI-bin directory listing
+                    </a>
+                </div>
+            </div>
+
+            <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
+                <h2 class="text-xl font-bold text-teal-400 flex items-center gap-2">
+                    <span class="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs font-mono">POST</span>
+                    <span class="bg-red-500/10 text-red-400 px-2 py-0.5 rounded text-xs font-mono">DELETE</span>
+                    File Manager
+                </h2>
+                <p class="text-slate-300 text-sm">Upload files to the server and delete them from a dedicated
+                    interface.</p>
+                <a href="/upload.html"
+                    class="inline-block bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded text-sm transition font-medium">
+                    Open Manager →
+                </a>
+            </div>
+
+        </div>
+
+        <footer class="text-center text-xs text-slate-500 pt-4 border-t border-slate-800">
+            Webserv 42 project made by dasamuel and wiwu
+        </footer>
+    </div>
+
+    <script src="index.js"></script>
+</body>
+
+</html>

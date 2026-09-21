@@ -1,0 +1,212 @@
+#include "cgi/CgiProcess.hpp"
+
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <map>
+#include <stdexcept>
+#include <vector>
+
+#include "log/Log.hpp"
+#include "utils/Utils.hpp"
+
+namespace {
+    // HTTP header name -> env variable name (user-agent -> USER_AGENT)
+    std::string httpheader_to_envvar_format(std::string header) {
+        for (size_t i = 0; i < header.size(); ++i) {
+            header[i] =
+                    static_cast<char>(std::toupper(static_cast<unsigned char>(header[i])));
+            if (header[i] == '-') header[i] = '_';
+        }
+        return "HTTP_" + header;
+    }
+
+    int interpret_status(int status) {
+        if WIFEXITED (status)  // child called exit() normally
+        {
+            if (WEXITSTATUS(status) == 0) return 200;
+            Log::debug("CGI returned -1 / error");
+            return 502;
+        }
+        Log::warning("CGI signaled / killed");
+        return 502;
+    }
+}  // namespace
+
+CgiProcess::CgiProcess(const RequestParser& req, const ServerConfig& config,
+                       const std::string& interpreter, const std::string& script_path)
+        : req(req), config(config), interpreter(interpreter), script_path(script_path) {
+    Log::event("CGI request");
+    Log::debug("interpreter: [" + interpreter + "] script path: [" + script_path + "]");
+    exec_status = 0;
+    pid = -1;
+
+    if (pipe(in_fd) == -1) {
+        Log::error("CGI pipe FAIL");
+        Log::error(std::strerror(errno));
+        exec_status = 500;
+        return;
+    }
+    if (pipe(out_fd) == -1) {
+        Log::error("CGI pipe FAIL");
+        Log::error(std::strerror(errno));
+        close(in_fd[0]);
+        close(in_fd[1]);
+        exec_status = 500;
+        return;
+    }
+
+    // Flush before forking so the child doesn't inherit (and re-emit) our
+    // buffered log output when it flushes stdout in child_fork().
+    std::cout << std::flush;
+    pid = fork();
+    if (pid == 0) {
+        child_fork();  // never returns
+    }
+    // parent
+    close(in_fd[0]);
+    close(out_fd[1]);
+    if (pid < 0) {  // failed
+        close(in_fd[1]);
+        close(out_fd[0]);
+        Log::error("CGI fork FAIL");
+        Log::error(std::strerror(errno));
+        exec_status = 500;  // fork failed -> 500
+    }
+}
+
+CgiProcess::~CgiProcess() {}
+
+// Reap the child once its stdout hits EOF and store the HTTP status
+// (200 / 502 / 504) in exec_status. Clears pid.
+void CgiProcess::reap() {
+    if (pid <= 0) {
+        exec_status = 500;
+        return;
+    }
+    int status;
+    if (waitpid(pid, &status, 0) == -1) {
+        Log::error("WAITPID FAIL");
+        Log::error(std::strerror(errno));
+        exec_status = 500;
+        pid = -1;
+        return;
+    }
+    exec_status = interpret_status(status);
+    pid = -1;
+}
+
+// Force-kill a still-running child and reap it.
+void CgiProcess::kill_child() {
+    if (pid <= 0) return;
+    kill(pid, SIGKILL);
+    waitpid(pid, NULL, 0);
+    pid = -1;
+}
+
+void CgiProcess::child_fork() {
+    // run the script from its own directory (same place the URI resolved to)
+    size_t slash = script_path.rfind('/');
+    std::string dir = (slash == std::string::npos) ? "." : script_path.substr(0, slash);
+    if (chdir(dir.c_str())) {
+        Log::error("chdir FAIL");
+        Log::error(std::strerror(errno));
+        throw std::runtime_error("CGI child fork fail");
+    }
+
+    if (dup2(in_fd[0], STDIN_FILENO) == -1) {
+        Log::error("DUP2 FAIL");
+        Log::error(std::strerror(errno));
+        throw std::runtime_error("CGI child fork fail");
+    }
+    std::cout << std::flush;
+    if (dup2(out_fd[1], STDOUT_FILENO) == -1) {
+        Log::error("DUP2 FAIL");
+        Log::error(std::strerror(errno));
+        throw std::runtime_error("CGI child fork fail");
+    }
+
+    // the child only needs fds 0 and 1: close the originals left over after dup2
+    close(out_fd[0]);
+    close(out_fd[1]);
+    close(in_fd[0]);
+    close(in_fd[1]);
+    child_execve();
+}
+
+// this builds the env char** in the stack
+void CgiProcess::child_execve() {
+    // we already chdir'd into the script's directory, so exec just the basename
+    size_t slash = script_path.rfind('/');
+    std::string file =
+            (slash == std::string::npos) ? script_path : script_path.substr(slash + 1);
+
+    // this block setups the envs
+    std::vector<std::string> strings;
+    {
+        strings.push_back("REQUEST_METHOD=" + req.method);
+        if (req.body.size()) {
+            // Use the decoded body length: a chunked request has no
+            // Content-Length header
+            strings.push_back("CONTENT_LENGTH=" + utils::to_str(req.body.size()));
+            strings.push_back("CONTENT_TYPE=" + req.get_header("content-type"));
+        }
+        strings.push_back("QUERY_STRING=" + req.query_string);
+        strings.push_back("SERVER_PROTOCOL=HTTP/1.0");
+        strings.push_back("GATEWAY_INTERFACE=CGI/1.1");
+        strings.push_back("SCRIPT_NAME=");  // 42 tester is buggy so we do that
+        strings.push_back("SCRIPT_FILENAME=" + file);
+        strings.push_back("REDIRECT_STATUS=200");
+        strings.push_back("PATH_INFO=" + req.URI);
+        std::string request_uri = req.URI;
+        if (!req.query_string.empty()) request_uri += "?" + req.query_string;
+        strings.push_back("REQUEST_URI=" + request_uri);
+
+        strings.push_back("REMOTE_ADDR=" + req.remote_addr);
+        strings.push_back("REMOTE_HOST=" + req.remote_addr);
+
+        std::string host = req.get_header("host");  // "localhost:8080"
+        size_t colon = host.find(':');
+        if (colon != std::string::npos) host = host.substr(0, colon);  // "localhost"
+        if (host.empty())
+            host = config.server_names.empty() ? config.host : config.server_names[0];
+        strings.push_back("SERVER_NAME=" + host);
+
+        strings.push_back("SERVER_PORT=" + utils::to_str(config.port));
+        strings.push_back("SERVER_SOFTWARE=webserv/1.0");
+    }
+    // this blocks add the header variables
+    {
+        for (t_dict::const_iterator it = req.get_header_ref().begin();
+             it != req.get_header_ref().end(); ++it) {
+            if (it->first == "content-length" || it->first == "content-type") continue;
+            strings.push_back(httpheader_to_envvar_format(it->first) + "=" + it->second);
+        }
+    }
+    std::vector<char*> cstrings;
+    for (size_t i = 0; i < strings.size(); ++i)
+        cstrings.push_back(const_cast<char*>(strings[i].c_str()));
+    // env in excve doesnt modify the strings so it's fine to const cast
+    cstrings.push_back(NULL);
+
+    // interpreter set -> [interpreter, script]; empty -> run the file directly
+    std::vector<char*> argv;
+    if (!interpreter.empty()) argv.push_back(const_cast<char*>(interpreter.c_str()));
+    argv.push_back(const_cast<char*>(file.c_str()));
+    argv.push_back(NULL);
+
+    const char* path = interpreter.empty() ? file.c_str() : interpreter.c_str();
+    Log::error("event:" + utils::to_str(path));
+    execve(path, argv.data(), cstrings.data());
+
+    Log::error("EXECVE FAIL");
+    Log::error(std::strerror(errno));
+    throw std::runtime_error("CGI child fork fail");
+    // be careful that there's no catch between this and the main() catch
+}

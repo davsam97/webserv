@@ -1,0 +1,66 @@
+#ifndef REQUESTPARSER_H
+#define REQUESTPARSER_H
+
+#include <map>
+#include <string>
+
+#include "config/Config.hpp"
+
+typedef std::map<std::string, std::string> t_dict;
+
+class RequestParser {
+    public:
+        enum State {
+            INCOMPLETE_HEADER,
+            AWAITING_CONFIG,
+            INCOMPLETE_BODY,
+            COMPLETE,
+            ERROR
+        };
+
+        RequestParser(std::string&);
+        ~RequestParser();
+
+        void parse();
+        void set_config(const ServerConfig& cfg);
+
+        inline State get_state() const { return state; };
+        inline int get_status_code() const { return status_code; };
+        inline void set_status_code(int code) { status_code = code; };
+        std::string get_header(std::string s) const;
+        const t_dict& get_header_ref() const { return header; }
+
+        std::string method;
+        std::string URI;           // path only, query stripped (e.g. "/cgi-bin/up.py")
+        std::string query_string;  // everything after '?', empty if none
+        std::string protocol;
+        std::string body;
+        std::string remote_addr;  // client IP, filled in by the Connection
+
+    private:
+        static const size_t MAX_HEADER_SIZE = 32000;
+
+        State state;
+        t_dict header;
+        int status_code;
+
+        // Resolved by the Connection from the Host header; NULL until then.
+        const ServerConfig* config;
+
+        size_t content_length;  // parsed content length
+        bool is_chunked;        // Transfer-Encoding: chunked
+
+        std::string& buffer;
+        size_t scan_pos;  // we scan the buffer until we find \r\n\r\n
+
+        void parse_header(std::string header_data, std::string delim);
+        void parse_start_line(std::string line);
+        void parse_header_line(std::string line);
+        void decode_chunked();  // consume chunked body from buffer into `body`
+
+        RequestParser();
+        RequestParser(const RequestParser&);
+        RequestParser& operator=(const RequestParser&);
+};
+
+#endif

@@ -1,0 +1,129 @@
+#include "server/Server.hpp"
+
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstddef>
+#include <cstring>
+#include <ctime>
+#include <iostream>
+#include <stdexcept>
+
+#include "connection/Connection.hpp"
+#include "event/AEventHandler.hpp"
+#include "event/Reactor.hpp"
+#include "log/Log.hpp"
+#include "utils/Utils.hpp"
+
+// One Server = one listening socket. `configs` are the virtual hosts sharing its
+// host:port; the first one defines the endpoint to bind.
+Server::Server(Reactor& reactor, const std::vector<ServerConfig>& configs)
+        : AEventHandler(reactor), configs(configs) {
+    const ServerConfig& first = configs[0];
+    create_socket(first.host, first.port);
+    log_event("Server Listening to: " + first.host + ":" + utils::to_str(first.port) +
+              ", fd:" + utils::to_str(fd));
+}
+
+// create socket -> nonblock -> bind -> listen
+// also sets the fd
+void Server::create_socket(const std::string& host, int port) {
+    {
+        this->fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == -1) {
+            Log::error("Server socket error");
+            throw std::runtime_error(std::strerror(errno));
+        }
+
+        int opt = 1;  // Allows to restart without TIME_WAIT
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        // The fd is made non-blocking when the loop registers it
+        // (Reactor::register_fd), before any accept() can run.
+    }
+
+    {
+        struct addrinfo hints;
+        std::memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;        // IPv4, to match the socket()
+        hints.ai_socktype = SOCK_STREAM;  // TCP
+        hints.ai_flags = AI_PASSIVE;  // node==NULL -> wildcard (INADDR_ANY) for binding
+
+        // NULL node => bind to all interfaces; otherwise resolve the given host
+        const char* node = (host.empty() || host == "0.0.0.0") ? NULL : host.c_str();
+        std::string service = utils::to_str(port);
+
+        struct addrinfo* res = NULL;
+        if (getaddrinfo(node, service.c_str(), &hints, &res) != 0 || res == NULL) {
+            close(fd);
+            throw std::runtime_error("getaddrinfo failed for host: " + host);
+        }
+        if (bind(fd, res->ai_addr, res->ai_addrlen) == -1) {
+            freeaddrinfo(res);  // free before throwing
+            close(fd);
+            throw std::runtime_error(std::strerror(errno));
+        }
+        freeaddrinfo(res);
+    }
+
+    {
+        const int MAX_CONNECTION = 10000;
+        if (listen(fd, MAX_CONNECTION) < 0) {
+            close(fd);
+            std::cerr << Log::red_bg << "listen error" << Log::nl;
+            throw std::runtime_error(std::strerror(errno));
+        }
+    }
+}
+
+Server::~Server() {}
+
+void Server::on_readable() { accept_new_connection(fd); }
+void Server::on_writable() { Log::error("This should never display"); }
+void Server::on_tick(time_t now) {
+    // A server never hangs up.
+    (void)now;
+    return;
+}
+
+// Construct a Connection and register it if no error
+void Server::accept_new_connection(int listen_fd) {
+    Connection* c;
+
+    sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+    int connection_fd = accept(listen_fd, (struct sockaddr*)&addr, &len);
+    if (connection_fd < 0) {
+        log_error(std::string("accept error: ") + std::strerror(errno));
+        return;  // drop this attempt, keep the server alive
+    }
+    c = new Connection(reactor, connection_fd, configs, addr);
+    reactor.register_fd(c->fd, POLLIN, c, true);
+    log_event("NEW Connection Socket FD: " + utils::to_str(c->fd));
+}
+
+void Server::log_info(std::string s) { std::cout << Log::color(0) << s << Log::nl; }
+
+void Server::log_error(std::string s) { Log::error(s); }
+
+void Server::log_event(std::string s) {
+    // lets do rainbow color
+    std::string bg = "\033[48;5;231m";
+    std::cout << bg << "[" << Log::timestamp() << "] " << Log::bold;
+    for (size_t i = 0; i < s.size(); ++i) {
+        std::cout << Log::gradient(i % 32);
+        std::cout << s[i];
+    }
+    std::cout << Log::nl;
+}
+
+std::ostream& operator<<(std::ostream& os, const sockaddr_in& addr) {
+    uint32_t ip = ntohl(addr.sin_addr.s_addr);  // host byte order
+    os << "    Address:";
+    os << ((ip >> 24) & 0xFF) << "." << ((ip >> 16) & 0xFF) << "." << ((ip >> 8) & 0xFF)
+       << "." << (ip & 0xFF) << "\n";
+    os << "    Port:   " << ntohs(addr.sin_port) << "\n";
+    return os;
+}

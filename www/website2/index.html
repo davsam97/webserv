@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home - website2</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <strong>website2</strong>
+    <nav>
+      <a href="index.html" class="active">Home</a>
+      <a href="about.html">About</a>
+      <a href="contact.html">Contact</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Welcome to website2</h1>
+    <p>This page is served by the second virtual host of <strong>webserv</strong>,
+       selected from the <code>Host</code> header.</p>
+
+    <div class="card">
+      <h2>Virtual hosts</h2>
+      <p>The same server process also answers on <code>localhost:8080</code>
+         with a different website.</p>
+    </div>
+
+    <div class="card">
+      <h2>Static files</h2>
+      <p>HTML, CSS and images are served straight from the <code>root</code>
+         directory with the right <code>Content-Type</code>.</p>
+    </div>
+  </main>
+
+  <footer>
+    Served by webserv &middot; virtual host <code>localhost2</code> &middot; port 8081
+  </footer>
+</body>
+</html>
